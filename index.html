@@ -1,0 +1,676 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>佳代子</title>
+<meta name="description" content="随机或按编号获取佳代子图片" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  /* ===== 单色高级感主题（纯黑白灰，白色为唯一强调色）===== */
+  :root {
+    --bg: #0a0a0b;
+    --surface: #101012;
+    --text: #f4f4f5;
+    --dim: #8a8a90;
+    --faint: #56565c;
+    --border: rgba(255, 255, 255, 0.10);
+    --border-strong: rgba(255, 255, 255, 0.24);
+    --accent: #ffffff;
+    --on-accent: #0a0a0b;
+    --radius: 12px;
+    --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    min-height: 100dvh;
+    color: var(--text);
+    background: var(--bg);
+    font-family: "Space Grotesk", -apple-system, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  .wrap {
+    max-width: 1040px;
+    margin: 0 auto;
+    padding: clamp(20px, 4vw, 40px) clamp(16px, 4vw, 32px) 80px;
+  }
+
+  /* ===== 顶栏：仅品牌 + 计数 ===== */
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 22px;
+    border-bottom: 1px solid var(--border);
+  }
+  .brand {
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+  .counter {
+    font-size: 13px;
+    color: var(--dim);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.02em;
+  }
+  .counter #curId { color: var(--text); }
+  .counter .sep { margin: 0 6px; color: var(--faint); }
+
+  /* ===== 视图切换 ===== */
+  .tabs {
+    display: flex;
+    gap: 28px;
+    margin: 22px 0 26px;
+  }
+  .tab {
+    background: none;
+    border: none;
+    border-bottom: 1.5px solid transparent;
+    color: var(--faint);
+    font: inherit;
+    font-size: 13px;
+    letter-spacing: 0.08em;
+    padding: 0 0 8px;
+    cursor: pointer;
+    transition: color 0.2s var(--ease), border-color 0.2s var(--ease);
+  }
+  .tab:hover { color: var(--dim); }
+  .tab.active { color: var(--text); border-bottom-color: var(--accent); }
+
+  .view { display: none; }
+  .view.active { display: block; }
+
+  /* ===== 单图舞台 ===== */
+  .stage {
+    position: relative;
+    min-height: 48vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    /* 微弱渐变背景，增加质感 */
+    background-image: radial-gradient(circle at center, rgba(255, 255, 255, 0.02) 0%, transparent 100%);
+  }
+  .stage img {
+    max-width: 100%;
+    max-height: 72vh;
+    object-fit: contain;
+    display: block;
+    opacity: 0;
+    transition: opacity 0.4s var(--ease);
+  }
+  .stage img.show { opacity: 1; }
+
+  .ph {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    color: var(--faint);
+    font-size: 12px;
+    letter-spacing: 0.1em;
+  }
+  .ph.hide { display: none; }
+  .spinner {
+    width: 26px; height: 26px;
+    border-radius: 50%;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    animation: spin 0.7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ===== 控制条 ===== */
+  .controls {
+    margin-top: 24px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: center;
+    justify-content: center;
+  }
+  .btn {
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    cursor: pointer;
+    border-radius: var(--radius);
+    transition: border-color 0.2s var(--ease), background 0.2s var(--ease), transform 0.12s var(--ease), color 0.2s var(--ease);
+  }
+  .btn.icon {
+    width: 42px; height: 42px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .btn.icon svg { width: 18px; height: 18px; display: block; }
+  .btn:hover { border-color: var(--border-strong); background: rgba(255, 255, 255, 0.04); }
+  .btn:active { transform: scale(0.97); }
+  .btn.primary {
+    background: var(--accent);
+    color: var(--on-accent);
+    border-color: var(--accent);
+  }
+  .btn.primary:hover { background: rgba(255, 255, 255, 0.88); border-color: var(--accent); }
+  .btn:focus-visible { outline: 2px solid var(--border-strong); outline-offset: 2px; }
+  .btn:disabled, .numwrap .go:disabled { opacity: 0.24; cursor: not-allowed; }
+  .btn:disabled:hover { border-color: var(--border); background: transparent; }
+  .btn.primary:disabled:hover { background: var(--accent); border-color: var(--accent); }
+
+  .numwrap {
+    display: flex;
+    align-items: stretch;
+    height: 42px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: rgba(255, 255, 255, 0.02);
+    overflow: hidden;
+    transition: border-color 0.2s var(--ease);
+  }
+  .numwrap:focus-within { border-color: var(--border-strong); }
+  .numwrap input {
+    width: 92px;
+    border: none;
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    font-size: 14px;
+    text-align: center;
+    padding: 0 10px;
+    outline: none;
+    font-variant-numeric: tabular-nums;
+  }
+  .numwrap input::placeholder { color: var(--faint); }
+  .numwrap input::-webkit-outer-spin-button,
+  .numwrap input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  .numwrap .go {
+    border: none;
+    border-left: 1px solid var(--border);
+    background: transparent;
+    color: var(--dim);
+    padding: 0 12px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    transition: color 0.2s var(--ease);
+  }
+  .numwrap .go svg { width: 16px; height: 16px; display: block; }
+  .numwrap .go:hover { color: var(--text); }
+
+  /* ===== 图库 ===== */
+  .gallery {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+    gap: 10px;
+  }
+  .thumb {
+    position: relative;
+    aspect-ratio: 1;
+    margin: 0;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    background: var(--surface);
+    cursor: pointer;
+    font: inherit;
+    color: inherit;
+    /* 关键性能优化：屏外缩略图跳过布局/绘制 */
+    content-visibility: auto;
+    contain-intrinsic-size: 148px 148px;
+    transition: border-color 0.2s var(--ease);
+  }
+  .thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    opacity: 0;
+    transition: opacity 0.4s var(--ease);
+  }
+  .thumb img.show { opacity: 1; }
+  .thumb:hover { border-color: var(--border-strong); }
+  .thumb.current { border-color: var(--accent); }
+  .thumb.gap { background: transparent; }
+  .thumb.gap::after {
+    content: "空缺";
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--faint);
+    font-size: 11px;
+    letter-spacing: 0.1em;
+  }
+  .thumb .tid {
+    position: absolute;
+    bottom: 6px;
+    right: 7px;
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.82);
+    background: rgba(0, 0, 0, 0.5);
+    padding: 1px 6px;
+    border-radius: 999px;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.03em;
+  }
+  .thumb:focus-visible { outline: 2px solid var(--border-strong); outline-offset: 2px; }
+
+  /* ===== Toast ===== */
+  .toast {
+    position: fixed;
+    bottom: 28px;
+    left: 50%;
+    transform: translateX(-50%) translateY(16px);
+    background: #ffffff;
+    border: 1px solid #ffffff;
+    color: #0a0a0b;
+    font-weight: 500;
+    padding: 10px 20px;
+    border-radius: 999px;
+    font-size: 13px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s var(--ease), transform 0.25s var(--ease);
+    z-index: 50;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  @media (max-width: 520px) {
+    .gallery { grid-template-columns: repeat(auto-fill, minmax(108px, 1fr)); gap: 8px; }
+    .thumb { contain-intrinsic-size: 108px 108px; }
+    .controls { gap: 8px; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { transition: none !important; animation: none !important; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="topbar">
+    <div class="brand">KAYOKO <span style="font-weight: 400; font-size: 13px; color: var(--dim); margin-left: 6px; letter-spacing: 0;">佳代子</span></div>
+    <div class="counter"><span id="curId">—</span><span class="sep">/</span><span id="total">—</span></div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab active" data-view="viewer">单图</button>
+    <button class="tab" data-view="gallery">图库</button>
+  </nav>
+
+  <!-- ===== 单图视图 ===== -->
+  <section class="view active" id="view-viewer">
+    <div class="stage" id="stage">
+      <div class="ph" id="placeholder"><div class="spinner"></div></div>
+      <img id="mainImg" alt="佳代子" decoding="async" />
+    </div>
+
+    <div class="controls">
+      <button class="btn icon" id="btnPrev" aria-label="上一张" title="上一张 (←)" disabled>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+      </button>
+      <button class="btn icon primary" id="btnRandom" aria-label="随机一张" title="随机 (R)" disabled>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 18h1.4c1.3 0 2.5-.6 3.3-1.7l6.1-8.6C13.6 6.6 14.8 6 16.1 6H22"/><path d="M18 2l4 4-4 4"/><path d="M2 6h1.9c1.5 0 2.9.9 3.6 2.2"/><path d="M22 18h-5.9c-1.3 0-2.5-.6-3.3-1.7l-.5-.7"/><path d="M18 14l4 4-4 4"/></svg>
+      </button>
+      <button class="btn icon" id="btnNext" aria-label="下一张" title="下一张 (→)" disabled>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+      </button>
+      <div class="numwrap">
+        <input id="numInput" type="number" min="1" inputmode="numeric" placeholder="编号" aria-label="图片编号" disabled />
+        <button class="go" id="btnGo" aria-label="前往该编号" title="前往" disabled>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></svg>
+        </button>
+      </div>
+      <button class="btn icon" id="btnCopy" aria-label="复制图片链接" title="复制链接" disabled>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
+      </button>
+      <button class="btn icon" id="btnDownload" aria-label="下载当前图片" title="下载图片 (D)" disabled>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      </button>
+    </div>
+  </section>
+
+  <!-- ===== 图库视图 ===== -->
+  <section class="view" id="view-gallery">
+    <div class="gallery" id="gallery"></div>
+  </section>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+(function () {
+  'use strict';
+
+  // ===== 配置：仅参考自 jrrp.js 的图床地址，与 bot 运行时完全解耦 =====
+  const CONFIG = {
+    BASE_URL: 'https://kayoko-1343642582.cos.ap-chongqing.myqcloud.com/kayoko/kayoko_',
+    EXTENSIONS: ['png', 'jpg', 'jpeg', 'webp', 'gif'],
+    CI_THUMB: '?imageMogr2/thumbnail/240x240/format/webp', // 图库缩略图（CI 开启时使用，显著省流量）
+    CI_PROBE: '?imageMogr2/thumbnail/8x8',                 // 存在性探测用极小图，近乎零流量
+    EXP_CAP: 1 << 20,                                       // 指数搜索安全上限（仅为防死循环，非图片数量）
+    MAX_CONCURRENT: 6                                       // 图库缩略图并发上限
+  };
+
+  // 图片数量不写死：每次打开页面都重新探测真实数量，新增图片自动纳入
+  const state = {
+    max: 0,
+    current: null,
+    ci: false,      // 数据万象 CI 是否可用
+    ready: false,
+    extCache: Object.create(null)
+  };
+
+  const $ = (id) => document.getElementById(id);
+  const mainImg = $('mainImg');
+  const placeholder = $('placeholder');
+  const numInput = $('numInput');
+  const curIdEl = $('curId');
+  const totalEl = $('total');
+  const galleryEl = $('gallery');
+  const actionBtns = [$('btnPrev'), $('btnRandom'), $('btnNext'), $('btnGo'), $('btnCopy'), $('btnDownload')];
+
+  // ===== 并发限制器（图库缩略图）=====
+  let _active = 0;
+  const _queue = [];
+  function schedule(task) { _queue.push(task); _pump(); }
+  function _pump() {
+    while (_active < CONFIG.MAX_CONCURRENT && _queue.length) {
+      const t = _queue.shift();
+      _active++;
+      Promise.resolve().then(t).finally(() => { _active--; _pump(); });
+    }
+  }
+
+  // ===== 工具 =====
+  const pad = (id) => String(id).padStart(3, '0');
+  const urlOf = (id, ext) => CONFIG.BASE_URL + pad(id) + '.' + ext;
+  // 探测地址：CI 开则用极小缩略图（省流量），否则用原图
+  const probeSrc = (id, ext) => state.ci ? urlOf(id, ext) + CONFIG.CI_PROBE : urlOf(id, ext);
+  // 图库缩略图地址：CI 开则 240px webp 缩略图，否则原图
+  const thumbSrc = (id, ext) => state.ci ? urlOf(id, ext) + CONFIG.CI_THUMB : urlOf(id, ext);
+
+  // 给 <img> 设 src，按扩展名顺序回退；srcFn 决定用原图/缩略图/探测图
+  function applyImgWithFallback(img, id, srcFn, onLoad, onFail) {
+    let settled = false;
+    const done = (ok, ext) => {
+      if (settled) return;
+      settled = true;
+      if (ok) { state.extCache[id] = ext; if (onLoad) onLoad(ext); }
+      else if (onFail) onFail();
+    };
+    let idx = 0;
+    const tryNext = () => {
+      if (idx >= CONFIG.EXTENSIONS.length) { done(false); return; }
+      const ext = CONFIG.EXTENSIONS[idx++];
+      img.onload = () => done(true, ext);
+      img.onerror = () => {
+        // 关键修复：COS 会因 Referer/CORS 校验或连接过多强制关闭连接（ERR_CONNECTION_CLOSED）
+        // 遇到网络重置或连接关闭，稍作延迟后重试当前格式，若重试 1 次仍然失败再走下一个格式
+        if (img.dataset.retry === ext) {
+          img.removeAttribute('data-retry');
+          tryNext();
+        } else {
+          img.dataset.retry = ext;
+          setTimeout(() => {
+            img.src = srcFn(id, ext) + (srcFn(id, ext).includes('?') ? '&' : '?') + 't=' + Math.random().toString(36).slice(2, 6);
+          }, 150);
+        }
+      };
+      img.src = srcFn(id, ext);
+    };
+    tryNext();
+  }
+
+  // 探测某编号是否存在并返回扩展名
+  function resolveExt(id, srcFn) {
+    if (state.extCache[id]) return Promise.resolve(state.extCache[id]);
+    srcFn = srcFn || probeSrc;
+    return new Promise((res) => {
+      const img = new Image();
+      applyImgWithFallback(img, id, srcFn, () => res(state.extCache[id]), () => res(null));
+    });
+  }
+
+  // 探测 CI 是否启用：用一张已知存在的图，看 thumbnail/8x8 是否真被缩小
+  function detectCI(anchorId, anchorExt) {
+    return new Promise((res) => {
+      const img = new Image();
+      img.onload = () => res(img.naturalWidth > 0 && img.naturalWidth <= 8);
+      img.onerror = () => {
+        // 如果极小图探测返回 onerror，可能是不支持数据万象 CI 样式参数，说明没开 CI
+        res(false);
+      };
+      img.src = urlOf(anchorId, anchorExt) + CONFIG.CI_PROBE;
+    });
+  }
+
+  // ===== 动态数量探测：指数搜索 + 二分查找，不预设数量 =====
+  async function detectMax() {
+    // 先在小编号里找一个肯定存在的"锚点"用于 CI 探测
+    let anchor = 0, anchorExt = null;
+    for (let id = 1; id <= 16; id++) {
+      const ext = await resolveExt(id, urlOf);  // 用原图探测锚点（此时 CI 未知）
+      if (ext) { anchor = id; anchorExt = ext; break; }
+    }
+    if (!anchor) return 0;  // 图床为空或不可达
+
+    state.ci = await detectCI(anchor, anchorExt);
+
+    // 指数搜索上界：从锚点翻倍直到某编号不存在
+    let lo = anchor, hi = anchor * 2;
+    if (lo < 1) lo = 1;
+    while (hi <= CONFIG.EXP_CAP) {
+      if (await resolveExt(hi)) { lo = hi; hi *= 2; }
+      else break;
+    }
+    // 二分查找 [lo, hi-1] 内最大存在的编号
+    let a = lo, b = (hi <= CONFIG.EXP_CAP) ? hi - 1 : CONFIG.EXP_CAP;
+    while (a < b) {
+      const mid = (a + b + 1) >> 1;
+      if (await resolveExt(mid)) a = mid; else b = mid - 1;
+    }
+    return a;
+  }
+
+  // ===== 单图加载 =====
+  function setCurrent(id) { state.current = id; curIdEl.textContent = pad(id); markGalleryCurrent(); }
+
+  function loadImage(id, onGap) {
+    id = parseInt(id, 10);
+    if (!id || id < 1 || id > state.max) { toast('编号需在 1 ~ ' + state.max); return; }
+    placeholder.classList.remove('hide');
+    mainImg.classList.remove('show');
+    applyImgWithFallback(mainImg, id, urlOf,
+      () => { placeholder.classList.add('hide'); mainImg.classList.add('show'); setCurrent(id); },
+      () => { if (onGap) onGap(); else setCurrent(id); }
+    );
+  }
+
+  function randomImage(r) {
+    if (!state.ready) return;
+    r = r || 0;
+    if (state.max < 1) return;
+    let id = Math.floor(Math.random() * state.max) + 1;
+    if (id === state.current && state.max > 1) id = (id % state.max) + 1;
+    loadImage(id, () => (r < 8 ? randomImage(r + 1) : setCurrent(id)));
+  }
+
+  function prevImage() { if (!state.ready) return; const c = state.current || 2; loadImage(c <= 1 ? state.max : c - 1); }
+  function nextImage() { if (!state.ready) return; const c = state.current || 0; loadImage(c >= state.max ? 1 : c + 1); }
+
+  function gotoSpecified() {
+    if (!state.ready) return;
+    const v = numInput.value.trim();
+    if (!v) { numInput.focus(); return; }
+    loadImage(parseInt(v, 10));
+  }
+
+  // ===== 图库 =====
+  const io = new IntersectionObserver((entries) => {
+    entries.forEach((e) => { if (e.isIntersecting) loadThumb(e.target); });
+  }, { rootMargin: '150px' });
+  let galleryRendered = 0;
+
+  function buildGallery() {
+    const frag = document.createDocumentFragment();
+    for (let id = 1; id <= state.max; id++) {
+      const cell = document.createElement('button');
+      cell.type = 'button';
+      cell.className = 'thumb';
+      cell.dataset.id = id;
+      cell.setAttribute('aria-label', '查看编号 ' + pad(id));
+      cell.innerHTML = '<img alt="" decoding="async" /><span class="tid">' + pad(id) + '</span>';
+      io.observe(cell);
+      frag.appendChild(cell);
+    }
+    galleryEl.appendChild(frag);
+    galleryRendered = state.max;
+    markGalleryCurrent();
+  }
+
+  function loadThumb(cell) {
+    if (cell.dataset.loaded === '1') return;
+    cell.dataset.loaded = '1';
+    const id = parseInt(cell.dataset.id, 10);
+    const img = cell.querySelector('img');
+    schedule(() => new Promise((done) => {
+      applyImgWithFallback(img, id, thumbSrc,
+        () => { img.classList.add('show'); done(); },
+        () => { cell.classList.add('gap'); done(); });
+    }));
+  }
+
+  function markGalleryCurrent() {
+    const prev = galleryEl.querySelector('.thumb.current');
+    if (prev) prev.classList.remove('current');
+    if (state.current == null) return;
+    const node = galleryEl.querySelector('.thumb[data-id="' + state.current + '"]');
+    if (node) node.classList.add('current');
+  }
+
+  galleryEl.addEventListener('click', (e) => {
+    const cell = e.target.closest('.thumb');
+    if (!cell) return;
+    switchView('viewer');
+    loadImage(parseInt(cell.dataset.id, 10));
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+
+  // ===== 视图切换 =====
+  function switchView(name) {
+    document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.view === name));
+    document.querySelectorAll('.view').forEach((v) => v.classList.remove('active'));
+    $('view-' + name).classList.add('active');
+  }
+
+  // ===== Toast =====
+  const toastEl = $('toast');
+  let toastTimer = null;
+  function toast(msg) {
+    toastEl.textContent = msg;
+    toastEl.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toastEl.classList.remove('show'), 1800);
+  }
+
+  function setBusy(busy) {
+    state.ready = !busy;
+    actionBtns.forEach((b) => { b.disabled = busy; });
+  }
+
+  // ===== 事件 =====
+  $('btnRandom').addEventListener('click', () => randomImage());
+  $('btnPrev').addEventListener('click', prevImage);
+  $('btnNext').addEventListener('click', nextImage);
+  $('btnGo').addEventListener('click', gotoSpecified);
+  numInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') gotoSpecified(); });
+  $('btnCopy').addEventListener('click', async () => {
+    if (!state.ready || state.current == null) { toast('暂无图片'); return; }
+    const ext = state.extCache[state.current];
+    if (!ext) { toast('当前为空缺位'); return; }
+    const link = urlOf(state.current, ext);
+    try { await navigator.clipboard.writeText(link); toast('已复制链接'); }
+    catch (_) { toast(link); }
+  });
+  $('btnDownload').addEventListener('click', async () => {
+    if (!state.ready || state.current == null) { toast('暂无图片'); return; }
+    const ext = state.extCache[state.current];
+    if (!ext) { toast('当前为空缺位'); return; }
+    const link = urlOf(state.current, ext);
+    const fileName = 'kayoko_' + pad(state.current) + '.' + ext;
+    toast('开始下载...');
+    try {
+      const res = await fetch(link);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      // 跨域或网络错误时，回退到在新窗口打开图片
+      window.open(link, '_blank');
+      toast('已在新窗口打开，请长按或右键保存');
+    }
+  });
+  document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => switchView(t.dataset.view)));
+
+  document.addEventListener('keydown', (e) => {
+    if (document.activeElement === numInput) return;
+    const inGallery = $('view-gallery').classList.contains('active');
+    if (e.key === 'r' || e.key === 'R') { randomImage(); if (inGallery) switchView('viewer'); return; }
+    if (e.key === 'd' || e.key === 'D') { $('btnDownload').click(); return; }
+    if (inGallery || !state.ready) return;
+    if (e.key === 'ArrowLeft') prevImage();
+    else if (e.key === 'ArrowRight') nextImage();
+  });
+
+  // ===== 初始化：先探测 CI 与数量，再启用交互（不读取 bot 缓存）=====
+  (async function init() {
+    setBusy(true);
+    placeholder.classList.remove('hide');
+    try {
+      const count = await detectMax();
+      if (count <= 0) {
+        placeholder.innerHTML = '<div>未检测到图片</div>';
+        setBusy(false);
+        return;
+      }
+      state.max = count;
+      totalEl.textContent = count;
+      numInput.max = count;
+      buildGallery();
+      setBusy(false);
+      randomImage();
+    } catch (err) {
+      placeholder.innerHTML = '<div>初始化失败</div>';
+      toast('初始化失败：' + (err && err.message ? err.message : '请检查网络'));
+      setBusy(false);
+    }
+  })();
+})();
+</script>
+</body>
+</html>
