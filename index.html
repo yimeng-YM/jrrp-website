@@ -341,8 +341,8 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
       </button>
       <div class="numwrap">
-        <input id="numInput" type="number" min="1" inputmode="numeric" placeholder="编号" aria-label="图片编号" />
-        <button class="go" id="btnGo" aria-label="前往该编号" title="前往">
+        <input id="numInput" type="number" min="1" inputmode="numeric" placeholder="编号" aria-label="图片编号" disabled />
+        <button class="go" id="btnGo" aria-label="前往该编号" title="前往" disabled>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></svg>
         </button>
       </div>
@@ -680,7 +680,6 @@
   function setBusy(busy) {
     state.ready = !busy;
     actionBtns.forEach((b) => { b.disabled = busy; });
-    numInput.disabled = busy;
   }
 
   // ===== 事件 =====
