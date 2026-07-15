@@ -3,7 +3,8 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>佳代子</title>
+<title>ONIKATA KAYOKO - 鬼方佳代子图库</title>
+<link rel="icon" type="image/x-icon" href="favicon.ico" />
 <meta name="description" content="随机或按编号获取佳代子图片" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -133,13 +134,10 @@
     animation: spin 0.7s linear infinite;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
-  @keyframes countPop {
-    0% { transform: scale(1); color: var(--text); }
-    35% { transform: scale(1.35); color: var(--accent); }
-    70% { transform: scale(0.95); }
-    100% { transform: scale(1); color: var(--text); }
-  }
-  .count-pop { animation: countPop 0.45s var(--ease); }
+  .roll-counter { display: inline-flex; vertical-align: middle; gap: 0; line-height: 1; }
+  .roll-digit { position: relative; display: inline-block; width: 0.65em; height: 1em; overflow: hidden; vertical-align: middle; line-height: 1; }
+  .roll-strip { display: block; transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1); will-change: transform; }
+  .roll-strip span { display: block; height: 1em; line-height: 1; text-align: center; }
 
   /* ===== 控制条 ===== */
   .controls {
@@ -341,8 +339,8 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
       </button>
       <div class="numwrap">
-        <input id="numInput" type="number" min="1" inputmode="numeric" placeholder="编号" aria-label="图片编号" disabled />
-        <button class="go" id="btnGo" aria-label="前往该编号" title="前往" disabled>
+        <input id="numInput" type="number" min="1" inputmode="numeric" placeholder="编号" aria-label="图片编号" />
+        <button class="go" id="btnGo" aria-label="前往该编号" title="前往">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></svg>
         </button>
       </div>
@@ -541,10 +539,7 @@
     if (a <= lastMax) return;
 
     state.max = a;
-    totalEl.textContent = a;
-    totalEl.classList.remove('count-pop');
-    void totalEl.offsetWidth;
-    totalEl.classList.add('count-pop');
+    updateRollingCounter(totalEl, a);
     numInput.max = a;
     saveCache(a);
     appendGallery(lastMax + 1, a);
@@ -557,6 +552,78 @@
       for (var k in state.extCache) exts[k] = state.extCache[k];
       localStorage.setItem("jrrp_max", JSON.stringify({ max: max, exts: exts }));
     } catch (_) {}
+  }
+
+  // ===== 滚动数字计数器（slot-machine 风格）=====
+  let rollCounterInited = false;
+  let rollDigitEls = [];
+  let rollCurrentDigits = [];
+
+  function updateRollingCounter(el, value) {
+    const str = String(value);
+    const digits = str.split('').map(Number);
+
+    if (!rollCounterInited) {
+      el.innerHTML = '';
+      el.className = 'roll-counter';
+      digits.forEach(function(digit) {
+        var d = document.createElement('span');
+        d.className = 'roll-digit';
+        var strip = document.createElement('span');
+        strip.className = 'roll-strip';
+        for (var i = 0; i <= 9; i++) {
+          var s = document.createElement('span');
+          s.textContent = i;
+          strip.appendChild(s);
+        }
+        d.appendChild(strip);
+        el.appendChild(d);
+        strip.style.transition = 'none';
+        strip.style.transform = 'translateY(-' + digit + 'em)';
+        rollDigitEls.push({ el: d, strip: strip });
+        rollCurrentDigits.push(digit);
+      });
+      rollCounterInited = true;
+      return;
+    }
+
+    while (rollDigitEls.length < digits.length) {
+      var idx = rollDigitEls.length;
+      var d = document.createElement('span');
+      d.className = 'roll-digit';
+      var strip = document.createElement('span');
+      strip.className = 'roll-strip';
+      for (var i = 0; i <= 9; i++) {
+        var s = document.createElement('span');
+        s.textContent = i;
+        strip.appendChild(s);
+      }
+      d.appendChild(strip);
+      el.appendChild(d);
+      strip.style.transition = 'none';
+      strip.style.transform = 'translateY(0em)';
+      rollDigitEls.push({ el: d, strip: strip });
+      rollCurrentDigits.push(0);
+    }
+
+    while (rollDigitEls.length > digits.length) {
+      var last = rollDigitEls.pop();
+      last.el.remove();
+      rollCurrentDigits.pop();
+    }
+
+    digits.forEach(function(digit, idx) {
+      var d = rollDigitEls[idx];
+      var oldDigit = rollCurrentDigits[idx];
+      if (oldDigit === digit) return;
+      var delay = (digits.length - 1 - idx) * 60;
+      d.strip.style.transition = 'none';
+      d.strip.style.transform = 'translateY(-' + oldDigit + 'em)';
+      void d.strip.offsetHeight;
+      d.strip.style.transition = 'transform 0.35s cubic-bezier(0.16, 1, 0.3, 1) ' + delay + 'ms';
+      d.strip.style.transform = 'translateY(-' + digit + 'em)';
+      rollCurrentDigits[idx] = digit;
+    });
   }
 
   // ===== 单图加载 =====
@@ -680,6 +747,7 @@
   function setBusy(busy) {
     state.ready = !busy;
     actionBtns.forEach((b) => { b.disabled = busy; });
+    numInput.disabled = busy;
   }
 
   // ===== 事件 =====
@@ -744,7 +812,7 @@
         return;
       }
       state.max = count;
-      totalEl.textContent = count;
+      updateRollingCounter(totalEl, count);
       numInput.max = count;
       buildGallery();
       setBusy(false);
