@@ -403,8 +403,6 @@
   // ===== 工具 =====
   const pad = (id) => String(id).padStart(3, '0');
   const urlOf = (id, ext) => CONFIG.BASE_URL + pad(id) + '.' + ext;
-  // 探测地址：CI 开则用极小缩略图（省流量），否则用原图
-  const probeSrc = (id, ext) => state.ci ? urlOf(id, ext) + CONFIG.CI_PROBE : urlOf(id, ext);
   // 图库缩略图地址：CI 开则 240px webp 缩略图，否则原图
   const thumbSrc = (id, ext) => state.ci ? urlOf(id, ext) + CONFIG.CI_THUMB : urlOf(id, ext);
 
@@ -417,10 +415,13 @@
       if (ok) { state.extCache[id] = ext; if (onLoad) onLoad(ext); }
       else if (onFail) onFail();
     };
+    // 如果 HEAD 探测已缓存了扩展名，优先使用它，失败再走完整回退
+    const known = state.extCache[id];
+    const exts = known ? [known, ...CONFIG.EXTENSIONS.filter(function(e) { return e !== known; })] : CONFIG.EXTENSIONS.slice();
     let idx = 0;
     const tryNext = () => {
-      if (idx >= CONFIG.EXTENSIONS.length) { done(false); return; }
-      const ext = CONFIG.EXTENSIONS[idx++];
+      if (idx >= exts.length) { done(false); return; }
+      const ext = exts[idx++];
       img.onload = () => done(true, ext);
       img.onerror = () => {
         // 关键修复：COS 会因 Referer/CORS 校验或连接过多强制关闭连接（ERR_CONNECTION_CLOSED）
@@ -441,29 +442,27 @@
   }
 
   // 探测某编号是否存在并返回扩展名
-  function resolveExt(id, srcFn) {
-    if (state.extCache[id]) return Promise.resolve(state.extCache[id]);
-    return new Promise((res) => {
-      let settled = false;
-      let pending = CONFIG.EXTENSIONS.length;
-      const exts = CONFIG.EXTENSIONS.slice();
-      const neighbor = state.extCache[id - 1] || state.extCache[id + 1];
-      if (neighbor) exts.sort((a) => a === neighbor ? -1 : 1);
-      for (const ext of exts) {
-        const img = new Image();
-        img.onload = () => { if (!settled) { settled = true; state.extCache[id] = ext; res(ext); } };
-        img.onerror = () => { if (--pending <= 0 && !settled) { settled = true; res(null); } };
-        img.src = urlOf(id, ext);
-      }
-    });
+  async function resolveExt(id, srcFn) {
+    if (state.extCache[id]) return state.extCache[id];
+    const exts = CONFIG.EXTENSIONS.slice();
+    const neighbor = state.extCache[id - 1] || state.extCache[id + 1];
+    if (neighbor) exts.sort((a) => a === neighbor ? -1 : 1);
+    const results = await Promise.all(exts.map(async (ext) => {
+      try {
+        const resp = await fetch(urlOf(id, ext), { method: 'HEAD' });
+        if (resp.ok) return ext;
+      } catch (_) {}
+      return null;
+    }));
+    const found = results.find(e => e !== null);
+    if (found) state.extCache[id] = found;
+    return found;
   }
-  function detectCI(anchorId, anchorExt) {
-    return new Promise((res) => {
-      const img = new Image();
-      img.onload = () => res(img.naturalWidth > 0 && img.naturalWidth <= 8);
-      img.onerror = () => res(false);
-      img.src = urlOf(anchorId, anchorExt) + CONFIG.CI_PROBE;
-    });
+  async function detectCI(anchorId, anchorExt) {
+    try {
+      const resp = await fetch(urlOf(anchorId, anchorExt) + CONFIG.CI_PROBE, { method: 'HEAD' });
+      return resp.ok;
+    } catch (_) { return false; }
   }
   // ===== 动态数量探测// ===== 动态数量探测：指数搜索 + 二分查找，不预设数量 =====// ===== 动态数量探测：指数搜索 + 二分查找，不预设数量 =====
   async function detectMax() {
