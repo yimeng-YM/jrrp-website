@@ -450,25 +450,22 @@
       const neighbor = state.extCache[id - 1] || state.extCache[id + 1];
       if (neighbor) exts.sort((a) => a === neighbor ? -1 : 1);
       for (const ext of exts) {
-        const url = urlOf(id, ext);
-        fetch(url, { method: 'HEAD', cache: 'force-cache', signal: AbortSignal.timeout(5000) })
-          .then((r) => {
-            if (settled) return;
-            if (r.ok) { settled = true; state.extCache[id] = ext; res(ext); }
-            else if (--pending <= 0) res(null);
-          })
-          .catch(() => { if (--pending <= 0 && !settled) { settled = true; res(null); } });
+        const img = new Image();
+        img.onload = () => { if (!settled) { settled = true; state.extCache[id] = ext; res(ext); } };
+        img.onerror = () => { if (--pending <= 0 && !settled) { settled = true; res(null); } };
+        img.src = urlOf(id, ext);
       }
     });
   }
-
   function detectCI(anchorId, anchorExt) {
-    return fetch(urlOf(anchorId, anchorExt) + CONFIG.CI_PROBE, { method: 'HEAD' })
-      .then((r) => r.ok)
-      .catch(() => false);
+    return new Promise((res) => {
+      const img = new Image();
+      img.onload = () => res(img.naturalWidth > 0 && img.naturalWidth <= 8);
+      img.onerror = () => res(false);
+      img.src = urlOf(anchorId, anchorExt) + CONFIG.CI_PROBE;
+    });
   }
-
-  // ===== 动态数量探测：指数搜索 + 二分查找，不预设数量 =====// ===== 动态数量探测：指数搜索 + 二分查找，不预设数量 =====
+  // ===== 动态数量探测// ===== 动态数量探测：指数搜索 + 二分查找，不预设数量 =====// ===== 动态数量探测：指数搜索 + 二分查找，不预设数量 =====
   async function detectMax() {
     try {
       const raw = localStorage.getItem('jrrp_max');
