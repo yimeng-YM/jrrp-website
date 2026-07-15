@@ -372,7 +372,7 @@
     CI_THUMB: '?imageMogr2/thumbnail/240x240/format/webp', // 图库缩略图（CI 开启时使用，显著省流量）
     CI_PROBE: '?imageMogr2/thumbnail/8x8',                 // 存在性探测用极小图，近乎零流量
     EXP_CAP: 1 << 20,                                       // 指数搜索安全上限（仅为防死循环，非图片数量）
-    MAX_CONCURRENT: 6                                       // 图库缩略图并发上限
+    MAX_CONCURRENT: 3                                       // 图库缩略图并发上限
   };
 
   // 图片数量不写死：每次打开页面都重新探测真实数量，新增图片自动纳入
@@ -433,12 +433,13 @@
         // 遇到网络重置或连接关闭，稍作延迟后重试当前格式，若重试 1 次仍然失败再走下一个格式
         if (img.dataset.retry === ext) {
           img.removeAttribute('data-retry');
-          tryNext();
+          // COS 连接关闭时，等 300ms 再试下一个扩展名，让连接池释放
+          setTimeout(tryNext, 300);
         } else {
           img.dataset.retry = ext;
           setTimeout(() => {
             img.src = srcFn(id, ext) + (srcFn(id, ext).includes('?') ? '&' : '?') + 't=' + Math.random().toString(36).slice(2, 6);
-          }, 150);
+          }, 200);
         }
       };
       img.src = srcFn(id, ext);
