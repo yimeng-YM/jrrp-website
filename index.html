@@ -471,7 +471,7 @@
       const raw = localStorage.getItem('jrrp_max');
       if (raw) {
         const parsed = JSON.parse(raw);
-        if (Date.now() - parsed.ts < 3600000) {
+        if (Date.now() - parsed.ts < 86400000) {
           if (parsed.exts) {
             for (const k of Object.keys(parsed.exts)) state.extCache[parseInt(k)] = parsed.exts[k];
           }
