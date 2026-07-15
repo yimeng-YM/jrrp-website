@@ -50,7 +50,7 @@
     border-bottom: 1px solid var(--border);
   }
   .brand {
-    font-size: 20px;
+    font-size: 28px;
     font-weight: 600;
     letter-spacing: 0.1em;
     text-transform: uppercase;
@@ -467,48 +467,88 @@
   }
   // ===== 动态数量探测// ===== 动态数量探测：指数搜索 + 二分查找，不预设数量 =====// ===== 动态数量探测：指数搜索 + 二分查找，不预设数量 =====
   async function detectMax() {
-    try {
-      const raw = localStorage.getItem('jrrp_max');
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Date.now() - parsed.ts < 86400000) {
-          if (parsed.exts) {
-            for (const k of Object.keys(parsed.exts)) state.extCache[parseInt(k)] = parsed.exts[k];
-          }
-          return parsed.max;
+    var cached = (function() {
+      try {
+        var raw = localStorage.getItem("jrrp_max");
+        if (!raw) return null;
+        var parsed = JSON.parse(raw);
+        if (parsed.exts) {
+          for (var k in parsed.exts) state.extCache[parseInt(k)] = parsed.exts[k];
         }
-      }
-    } catch (_) {}
+        return parsed;
+      } catch (_) {}
+      return null;
+    })();
 
-    const promises = [];
-    for (let id = 1; id <= 16; id++) {
-      promises.push(resolveExt(id).then((ext) => ext ? { id, ext } : null));
+    if (cached) {
+      state.max = cached.max;
+      setTimeout(function() { checkNewImages(cached.max); }, 200);
+      return cached.max;
     }
-    const results = await Promise.all(promises);
-    let anchor = null;
-    for (const r of results) { if (r) { anchor = r; break; } }
+
+    // 无缓存：完整探测
+    var anchor = await findAnchor();
     if (!anchor) return 0;
 
     state.ci = await detectCI(anchor.id, anchor.ext);
 
-    let lo = anchor.id, hi = anchor.id * 2;
+    var lo = anchor.id, hi = anchor.id * 2;
     while (hi <= CONFIG.EXP_CAP) {
       if (await resolveExt(hi)) { lo = hi; hi *= 2; }
       else break;
     }
-    let a = lo, b = (hi <= CONFIG.EXP_CAP) ? hi - 1 : CONFIG.EXP_CAP;
+    var a = lo, b = (hi <= CONFIG.EXP_CAP) ? hi - 1 : CONFIG.EXP_CAP;
     while (a < b) {
-      const mid = (a + b + 1) >> 1;
+      var mid = (a + b + 1) >> 1;
       if (await resolveExt(mid)) a = mid; else b = mid - 1;
     }
 
-    try {
-      const exts = {};
-      for (const k of Object.keys(state.extCache)) exts[k] = state.extCache[k];
-      localStorage.setItem('jrrp_max', JSON.stringify({ max: a, exts: exts, ts: Date.now() }));
-    } catch (_) {}
-
+    saveCache(a);
     return a;
+  }
+
+  async function findAnchor() {
+    var promises = [];
+    for (let id = 1; id <= 16; id++) {
+      promises.push(resolveExt(id).then(function(ext) { return ext ? { id: id, ext: ext } : null; }));
+    }
+    var results = await Promise.all(promises);
+    for (var r = 0; r < results.length; r++) { if (results[r]) return results[r]; }
+    return null;
+  }
+
+  async function checkNewImages(lastMax) {
+    var lo = lastMax, hi = lastMax + 1;
+    if (hi > CONFIG.EXP_CAP) return;
+    while (hi <= CONFIG.EXP_CAP) {
+      if (await resolveExt(hi)) { lo = hi; hi *= 2; }
+      else break;
+    }
+    if (lo <= lastMax) return;
+
+    var a = lo, b = (hi <= CONFIG.EXP_CAP) ? hi - 1 : CONFIG.EXP_CAP;
+    while (a < b) {
+      var mid = (a + b + 1) >> 1;
+      if (await resolveExt(mid)) a = mid; else b = mid - 1;
+    }
+
+    if (a <= lastMax) return;
+
+    state.max = a;
+    totalEl.textContent = a;
+    numInput.max = a;
+    saveCache(a);
+    galleryEl.innerHTML = '';
+    buildGallery();
+    toast('发现新图片，已更新');
+  }
+
+  function saveCache(max) {
+    try {
+      var exts = {};
+      for (var k in state.extCache) exts[k] = state.extCache[k];
+      localStorage.setItem("jrrp_max", JSON.stringify({ max: max, exts: exts }));
+    } catch (_) {}
   }
 
   // ===== 单图加载 =====
