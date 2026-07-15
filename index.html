@@ -133,6 +133,13 @@
     animation: spin 0.7s linear infinite;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes countPop {
+    0% { transform: scale(1); color: var(--text); }
+    35% { transform: scale(1.35); color: var(--accent); }
+    70% { transform: scale(0.95); }
+    100% { transform: scale(1); color: var(--text); }
+  }
+  .count-pop { animation: countPop 0.45s var(--ease); }
 
   /* ===== 控制条 ===== */
   .controls {
@@ -535,10 +542,12 @@
 
     state.max = a;
     totalEl.textContent = a;
+    totalEl.classList.remove('count-pop');
+    void totalEl.offsetWidth;
+    totalEl.classList.add('count-pop');
     numInput.max = a;
     saveCache(a);
-    galleryEl.innerHTML = '';
-    buildGallery();
+    appendGallery(lastMax + 1, a);
     toast('发现新图片，已更新');
   }
 
@@ -603,6 +612,23 @@
     }
     galleryEl.appendChild(frag);
     galleryRendered = state.max;
+    markGalleryCurrent();
+ }
+
+  function appendGallery(fromId, toId) {
+    const frag = document.createDocumentFragment();
+    for (let id = fromId; id <= toId; id++) {
+      const cell = document.createElement('button');
+      cell.type = 'button';
+      cell.className = 'thumb';
+      cell.dataset.id = id;
+      cell.setAttribute('aria-label', '查看编号 ' + pad(id));
+      cell.innerHTML = '<img alt="" decoding="async" /><span class="tid">' + pad(id) + '</span>';
+      io.observe(cell);
+      frag.appendChild(cell);
+    }
+    galleryEl.appendChild(frag);
+    galleryRendered = toId;
     markGalleryCurrent();
   }
 
