@@ -443,51 +443,74 @@
   // 探测某编号是否存在并返回扩展名
   function resolveExt(id, srcFn) {
     if (state.extCache[id]) return Promise.resolve(state.extCache[id]);
-    srcFn = srcFn || probeSrc;
     return new Promise((res) => {
-      const img = new Image();
-      applyImgWithFallback(img, id, srcFn, () => res(state.extCache[id]), () => res(null));
+      let settled = false;
+      let pending = CONFIG.EXTENSIONS.length;
+      const exts = CONFIG.EXTENSIONS.slice();
+      const neighbor = state.extCache[id - 1] || state.extCache[id + 1];
+      if (neighbor) exts.sort((a) => a === neighbor ? -1 : 1);
+      for (const ext of exts) {
+        const url = urlOf(id, ext);
+        fetch(url, { method: 'HEAD', cache: 'force-cache', signal: AbortSignal.timeout(5000) })
+          .then((r) => {
+            if (settled) return;
+            if (r.ok) { settled = true; state.extCache[id] = ext; res(ext); }
+            else if (--pending <= 0) res(null);
+          })
+          .catch(() => { if (--pending <= 0 && !settled) { settled = true; res(null); } });
+      }
     });
   }
 
-  // 探测 CI 是否启用：用一张已知存在的图，看 thumbnail/8x8 是否真被缩小
   function detectCI(anchorId, anchorExt) {
-    return new Promise((res) => {
-      const img = new Image();
-      img.onload = () => res(img.naturalWidth > 0 && img.naturalWidth <= 8);
-      img.onerror = () => {
-        // 如果极小图探测返回 onerror，可能是不支持数据万象 CI 样式参数，说明没开 CI
-        res(false);
-      };
-      img.src = urlOf(anchorId, anchorExt) + CONFIG.CI_PROBE;
-    });
+    return fetch(urlOf(anchorId, anchorExt) + CONFIG.CI_PROBE, { method: 'HEAD' })
+      .then((r) => r.ok)
+      .catch(() => false);
   }
 
-  // ===== 动态数量探测：指数搜索 + 二分查找，不预设数量 =====
+  // ===== 动态数量探测：指数搜索 + 二分查找，不预设数量 =====// ===== 动态数量探测：指数搜索 + 二分查找，不预设数量 =====
   async function detectMax() {
-    // 先在小编号里找一个肯定存在的"锚点"用于 CI 探测
-    let anchor = 0, anchorExt = null;
+    try {
+      const raw = localStorage.getItem('jrrp_max');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Date.now() - parsed.ts < 3600000) {
+          if (parsed.exts) {
+            for (const k of Object.keys(parsed.exts)) state.extCache[parseInt(k)] = parsed.exts[k];
+          }
+          return parsed.max;
+        }
+      }
+    } catch (_) {}
+
+    const promises = [];
     for (let id = 1; id <= 16; id++) {
-      const ext = await resolveExt(id, urlOf);  // 用原图探测锚点（此时 CI 未知）
-      if (ext) { anchor = id; anchorExt = ext; break; }
+      promises.push(resolveExt(id).then((ext) => ext ? { id, ext } : null));
     }
-    if (!anchor) return 0;  // 图床为空或不可达
+    const results = await Promise.all(promises);
+    let anchor = null;
+    for (const r of results) { if (r) { anchor = r; break; } }
+    if (!anchor) return 0;
 
-    state.ci = await detectCI(anchor, anchorExt);
+    state.ci = await detectCI(anchor.id, anchor.ext);
 
-    // 指数搜索上界：从锚点翻倍直到某编号不存在
-    let lo = anchor, hi = anchor * 2;
-    if (lo < 1) lo = 1;
+    let lo = anchor.id, hi = anchor.id * 2;
     while (hi <= CONFIG.EXP_CAP) {
       if (await resolveExt(hi)) { lo = hi; hi *= 2; }
       else break;
     }
-    // 二分查找 [lo, hi-1] 内最大存在的编号
     let a = lo, b = (hi <= CONFIG.EXP_CAP) ? hi - 1 : CONFIG.EXP_CAP;
     while (a < b) {
       const mid = (a + b + 1) >> 1;
       if (await resolveExt(mid)) a = mid; else b = mid - 1;
     }
+
+    try {
+      const exts = {};
+      for (const k of Object.keys(state.extCache)) exts[k] = state.extCache[k];
+      localStorage.setItem('jrrp_max', JSON.stringify({ max: a, exts: exts, ts: Date.now() }));
+    } catch (_) {}
+
     return a;
   }
 
