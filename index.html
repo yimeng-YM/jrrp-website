@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>ONIKATA KAYOKO - 鬼方佳代子图库</title>
+<title>ONIKATA KAYOKO - 鬼方佳代子图片</title>
 <link rel="icon" type="image/png" sizes="32x32" href="favicon.png" />
 <link rel="icon" type="image/x-icon" href="favicon.ico" />
 <meta name="description" content="随机或按编号获取佳代子图片" />
@@ -66,31 +66,8 @@
   .counter #curId { color: var(--text); }
   .counter .sep { margin: 0 6px; color: var(--faint); }
 
-  /* ===== 视图切换 ===== */
-  .tabs {
-    display: flex;
-    gap: 28px;
-    margin: 22px 0 26px;
-  }
-  .tab {
-    background: none;
-    border: none;
-    border-bottom: 1.5px solid transparent;
-    color: var(--faint);
-    font: inherit;
-    font-size: 13px;
-    letter-spacing: 0.08em;
-    padding: 0 0 8px;
-    cursor: pointer;
-    transition: color 0.2s var(--ease), border-color 0.2s var(--ease);
-  }
-  .tab:hover { color: var(--dim); }
-  .tab.active { color: var(--text); border-bottom-color: var(--accent); }
-
-  .view { display: none; }
-  .view.active { display: block; }
-
   /* ===== 单图舞台 ===== */
+  .viewer { margin-top: 26px; }
   .stage {
     position: relative;
     min-height: 48vh;
@@ -218,66 +195,6 @@
   .numwrap .go svg { width: 16px; height: 16px; display: block; }
   .numwrap .go:hover { color: var(--text); }
 
-  /* ===== 图库 ===== */
-  .gallery {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
-    gap: 10px;
-  }
-  .thumb {
-    position: relative;
-    aspect-ratio: 1;
-    margin: 0;
-    padding: 0;
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    overflow: hidden;
-    background: var(--surface);
-    cursor: pointer;
-    font: inherit;
-    color: inherit;
-    /* 关键性能优化：屏外缩略图跳过布局/绘制 */
-    content-visibility: auto;
-    contain-intrinsic-size: 148px 148px;
-    transition: border-color 0.2s var(--ease);
-  }
-  .thumb img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    display: block;
-    opacity: 0;
-    transition: opacity 0.4s var(--ease);
-  }
-  .thumb img.show { opacity: 1; }
-  .thumb:hover { border-color: var(--border-strong); }
-  .thumb.current { border-color: var(--accent); }
-  .thumb.gap { background: transparent; }
-  .thumb.gap::after {
-    content: "空缺";
-    position: absolute;
-    inset: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--faint);
-    font-size: 11px;
-    letter-spacing: 0.1em;
-  }
-  .thumb .tid {
-    position: absolute;
-    bottom: 6px;
-    right: 7px;
-    font-size: 10px;
-    color: rgba(255, 255, 255, 0.82);
-    background: rgba(0, 0, 0, 0.5);
-    padding: 1px 6px;
-    border-radius: 999px;
-    font-variant-numeric: tabular-nums;
-    letter-spacing: 0.03em;
-  }
-  .thumb:focus-visible { outline: 2px solid var(--border-strong); outline-offset: 2px; }
-
   /* ===== Toast ===== */
   .toast {
     position: fixed;
@@ -300,8 +217,6 @@
   .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
   @media (max-width: 520px) {
-    .gallery { grid-template-columns: repeat(auto-fill, minmax(108px, 1fr)); gap: 8px; }
-    .thumb { contain-intrinsic-size: 108px 108px; }
     .controls { gap: 8px; }
   }
 
@@ -317,13 +232,7 @@
     <div class="counter"><span id="curId">—</span><span class="sep">/</span><span id="total">—</span></div>
   </header>
 
-  <nav class="tabs">
-    <button class="tab active" data-view="viewer">单图</button>
-    <button class="tab" data-view="gallery">图库</button>
-  </nav>
-
-  <!-- ===== 单图视图 ===== -->
-  <section class="view active" id="view-viewer">
+  <section class="viewer">
     <div class="stage" id="stage">
       <div class="ph" id="placeholder"><div class="spinner"></div></div>
       <img id="mainImg" alt="佳代子" decoding="async" />
@@ -354,10 +263,6 @@
     </div>
   </section>
 
-  <!-- ===== 图库视图 ===== -->
-  <section class="view" id="view-gallery">
-    <div class="gallery" id="gallery"></div>
-  </section>
 </div>
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
@@ -370,17 +275,13 @@
   const CONFIG = {
     BASE_URL: 'https://kayoko-1343642582.cos.ap-chongqing.myqcloud.com/kayoko/kayoko_',
     EXTENSIONS: ['png', 'jpg', 'jpeg', 'webp', 'gif'],
-    CI_THUMB: '?imageMogr2/thumbnail/240x240/format/webp', // 图库缩略图（CI 开启时使用，显著省流量）
-    CI_PROBE: '?imageMogr2/thumbnail/8x8',                 // 存在性探测用极小图，近乎零流量
-    EXP_CAP: 1 << 20,                                       // 指数搜索安全上限（仅为防死循环，非图片数量）
-    MAX_CONCURRENT: 3                                       // 图库缩略图并发上限
+    EXP_CAP: 1 << 20 // 指数搜索安全上限（仅为防死循环，非图片数量）
   };
 
   // 图片数量不写死：每次打开页面都重新探测真实数量，新增图片自动纳入
   const state = {
     max: 0,
     current: null,
-    ci: false,      // 数据万象 CI 是否可用
     ready: false,
     extCache: Object.create(null)
   };
@@ -391,28 +292,13 @@
   const numInput = $('numInput');
   const curIdEl = $('curId');
   const totalEl = $('total');
-  const galleryEl = $('gallery');
   const actionBtns = [$('btnPrev'), $('btnRandom'), $('btnNext'), $('btnGo'), $('btnCopy'), $('btnDownload')];
-
-  // ===== 并发限制器（图库缩略图）=====
-  let _active = 0;
-  const _queue = [];
-  function schedule(task) { _queue.push(task); _pump(); }
-  function _pump() {
-    while (_active < CONFIG.MAX_CONCURRENT && _queue.length) {
-      const t = _queue.shift();
-      _active++;
-      Promise.resolve().then(t).finally(() => { _active--; _pump(); });
-    }
-  }
 
   // ===== 工具 =====
   const pad = (id) => String(id).padStart(3, '0');
   const urlOf = (id, ext) => CONFIG.BASE_URL + pad(id) + '.' + ext;
-  // 图库缩略图地址：CI 开则 240px webp 缩略图，否则原图
-  const thumbSrc = (id, ext) => state.ci ? urlOf(id, ext) + CONFIG.CI_THUMB : urlOf(id, ext);
 
-  // 给 <img> 设 src，按扩展名顺序回退；srcFn 决定用原图/缩略图/探测图
+  // 给 <img> 设 src，按扩展名顺序回退
   function applyImgWithFallback(img, id, srcFn, onLoad, onFail) {
     let settled = false;
     const done = (ok, ext) => {
@@ -465,12 +351,6 @@
     if (found) state.extCache[id] = found;
     return found;
   }
-  async function detectCI(anchorId, anchorExt) {
-    try {
-      const resp = await fetch(urlOf(anchorId, anchorExt) + CONFIG.CI_PROBE, { method: 'HEAD' });
-      return resp.ok;
-    } catch (_) { return false; }
-  }
   // ===== 动态数量探测// ===== 动态数量探测：指数搜索 + 二分查找，不预设数量 =====// ===== 动态数量探测：指数搜索 + 二分查找，不预设数量 =====
   async function detectMax() {
     var cached = (function() {
@@ -495,8 +375,6 @@
     // 无缓存：完整探测
     var anchor = await findAnchor();
     if (!anchor) return 0;
-
-    state.ci = await detectCI(anchor.id, anchor.ext);
 
     var lo = anchor.id, hi = anchor.id * 2;
     while (hi <= CONFIG.EXP_CAP) {
@@ -544,7 +422,6 @@
     updateRollingCounter(totalEl, a);
     numInput.max = a;
     saveCache(a);
-    appendGallery(lastMax + 1, a);
     toast('发现新图片，已更新');
   }
 
@@ -629,7 +506,7 @@
   }
 
   // ===== 单图加载 =====
-  function setCurrent(id) { state.current = id; curIdEl.textContent = pad(id); markGalleryCurrent(); }
+  function setCurrent(id) { state.current = id; curIdEl.textContent = pad(id); }
 
   function loadImage(id, onGap) {
     id = parseInt(id, 10);
@@ -659,81 +536,6 @@
     const v = numInput.value.trim();
     if (!v) { numInput.focus(); return; }
     loadImage(parseInt(v, 10));
-  }
-
-  // ===== 图库 =====
-  const io = new IntersectionObserver((entries) => {
-    entries.forEach((e) => { if (e.isIntersecting) loadThumb(e.target); });
-  }, { rootMargin: '150px' });
-  let galleryRendered = 0;
-
-  function buildGallery() {
-    const frag = document.createDocumentFragment();
-    for (let id = 1; id <= state.max; id++) {
-      const cell = document.createElement('button');
-      cell.type = 'button';
-      cell.className = 'thumb';
-      cell.dataset.id = id;
-      cell.setAttribute('aria-label', '查看编号 ' + pad(id));
-      cell.innerHTML = '<img alt="" decoding="async" /><span class="tid">' + pad(id) + '</span>';
-      io.observe(cell);
-      frag.appendChild(cell);
-    }
-    galleryEl.appendChild(frag);
-    galleryRendered = state.max;
-    markGalleryCurrent();
- }
-
-  function appendGallery(fromId, toId) {
-    const frag = document.createDocumentFragment();
-    for (let id = fromId; id <= toId; id++) {
-      const cell = document.createElement('button');
-      cell.type = 'button';
-      cell.className = 'thumb';
-      cell.dataset.id = id;
-      cell.setAttribute('aria-label', '查看编号 ' + pad(id));
-      cell.innerHTML = '<img alt="" decoding="async" /><span class="tid">' + pad(id) + '</span>';
-      io.observe(cell);
-      frag.appendChild(cell);
-    }
-    galleryEl.appendChild(frag);
-    galleryRendered = toId;
-    markGalleryCurrent();
-  }
-
-  function loadThumb(cell) {
-    if (cell.dataset.loaded === '1') return;
-    cell.dataset.loaded = '1';
-    const id = parseInt(cell.dataset.id, 10);
-    const img = cell.querySelector('img');
-    schedule(() => new Promise((done) => {
-      applyImgWithFallback(img, id, thumbSrc,
-        () => { img.classList.add('show'); done(); },
-        () => { cell.classList.add('gap'); done(); });
-    }));
-  }
-
-  function markGalleryCurrent() {
-    const prev = galleryEl.querySelector('.thumb.current');
-    if (prev) prev.classList.remove('current');
-    if (state.current == null) return;
-    const node = galleryEl.querySelector('.thumb[data-id="' + state.current + '"]');
-    if (node) node.classList.add('current');
-  }
-
-  galleryEl.addEventListener('click', (e) => {
-    const cell = e.target.closest('.thumb');
-    if (!cell) return;
-    switchView('viewer');
-    loadImage(parseInt(cell.dataset.id, 10));
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  });
-
-  // ===== 视图切换 =====
-  function switchView(name) {
-    document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.view === name));
-    document.querySelectorAll('.view').forEach((v) => v.classList.remove('active'));
-    $('view-' + name).classList.add('active');
   }
 
   // ===== Toast =====
@@ -790,19 +592,16 @@
       toast('已在新窗口打开，请长按或右键保存');
     }
   });
-  document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => switchView(t.dataset.view)));
-
   document.addEventListener('keydown', (e) => {
     if (document.activeElement === numInput) return;
-    const inGallery = $('view-gallery').classList.contains('active');
-    if (e.key === 'r' || e.key === 'R') { randomImage(); if (inGallery) switchView('viewer'); return; }
+    if (e.key === 'r' || e.key === 'R') { randomImage(); return; }
     if (e.key === 'd' || e.key === 'D') { $('btnDownload').click(); return; }
-    if (inGallery || !state.ready) return;
+    if (!state.ready) return;
     if (e.key === 'ArrowLeft') prevImage();
     else if (e.key === 'ArrowRight') nextImage();
   });
 
-  // ===== 初始化：先探测 CI 与数量，再启用交互（不读取 bot 缓存）=====
+  // ===== 初始化：先探测数量，再启用交互（不读取 bot 缓存）=====
   (async function init() {
     setBusy(true);
     placeholder.classList.remove('hide');
@@ -816,7 +615,6 @@
       state.max = count;
       updateRollingCounter(totalEl, count);
       numInput.max = count;
-      buildGallery();
       setBusy(false);
       randomImage();
     } catch (err) {
