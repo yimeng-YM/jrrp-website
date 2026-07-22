@@ -275,12 +275,14 @@
   const CONFIG = {
     BASE_URL: 'https://kayoko-1343642582.cos.ap-chongqing.myqcloud.com/kayoko/kayoko_',
     EXTENSIONS: ['png', 'jpg', 'jpeg', 'webp', 'gif'],
-    EXP_CAP: 1 << 20 // 指数搜索安全上限（仅为防死循环，非图片数量）
+    DEFAULT_MAX: 930,              // 首次打开或探测失败时使用
+    PROBE_INTERVAL: 6 * 60 * 60 * 1000, // 每个浏览器最多每 6 小时复检一次
+    PROBE_DELAY: 150,              // 探测请求严格串行，避免触发 COS 限流
+    PROBE_TIMEOUT: 5000
   };
 
-  // 图片数量不写死：每次打开页面都重新探测真实数量，新增图片自动纳入
   const state = {
-    max: 0,
+    max: CONFIG.DEFAULT_MAX,
     current: null,
     ready: false,
     extCache: Object.create(null)
@@ -307,7 +309,7 @@
       if (ok) { state.extCache[id] = ext; if (onLoad) onLoad(ext); }
       else if (onFail) onFail();
     };
-    // 如果 HEAD 探测已缓存了扩展名，优先使用它，失败再走完整回退
+    // 已成功加载过的编号优先使用其扩展名，失败再走完整回退
     const known = state.extCache[id];
     const exts = known ? [known, ...CONFIG.EXTENSIONS.filter(function(e) { return e !== known; })] : CONFIG.EXTENSIONS.slice();
     let idx = 0;
@@ -334,103 +336,117 @@
     tryNext();
   }
 
-  // 探测某编号是否存在并返回扩展名
-  async function resolveExt(id, srcFn) {
-    if (state.extCache[id]) return state.extCache[id];
-    const exts = CONFIG.EXTENSIONS.slice();
-    const neighbor = state.extCache[id - 1] || state.extCache[id + 1];
-    if (neighbor) exts.sort((a) => a === neighbor ? -1 : 1);
-    const results = await Promise.all(exts.map(async (ext) => {
-      try {
-        const resp = await fetch(urlOf(id, ext), { method: 'HEAD' });
-        if (resp.ok) return ext;
-      } catch (_) {}
-      return null;
-    }));
-    const found = results.find(e => e !== null);
-    if (found) state.extCache[id] = found;
-    return found;
-  }
-  // ===== 动态数量探测// ===== 动态数量探测：指数搜索 + 二分查找，不预设数量 =====// ===== 动态数量探测：指数搜索 + 二分查找，不预设数量 =====
-  async function detectMax() {
-    var cached = (function() {
-      try {
-        var raw = localStorage.getItem("jrrp_max");
-        if (!raw) return null;
-        var parsed = JSON.parse(raw);
-        if (parsed.exts) {
-          for (var k in parsed.exts) state.extCache[parseInt(k)] = parsed.exts[k];
-        }
-        return parsed;
-      } catch (_) {}
-      return null;
-    })();
+  // ===== 低流量数量探测 =====
+  const COUNT_CACHE_KEY = 'jrrp_count_v2';
+  const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-    if (cached) {
-      state.max = cached.max;
-      setTimeout(function() { checkNewImages(cached.max); }, 200);
-      return cached.max;
-    }
-
-    // 无缓存：完整探测
-    var anchor = await findAnchor();
-    if (!anchor) return 0;
-
-    var lo = anchor.id, hi = anchor.id * 2;
-    while (hi <= CONFIG.EXP_CAP) {
-      if (await resolveExt(hi)) { lo = hi; hi *= 2; }
-      else break;
-    }
-    var a = lo, b = (hi <= CONFIG.EXP_CAP) ? hi - 1 : CONFIG.EXP_CAP;
-    while (a < b) {
-      var mid = (a + b + 1) >> 1;
-      if (await resolveExt(mid)) a = mid; else b = mid - 1;
-    }
-
-    saveCache(a);
-    return a;
-  }
-
-  async function findAnchor() {
-    var promises = [];
-    for (let id = 1; id <= 16; id++) {
-      promises.push(resolveExt(id).then(function(ext) { return ext ? { id: id, ext: ext } : null; }));
-    }
-    var results = await Promise.all(promises);
-    for (var r = 0; r < results.length; r++) { if (results[r]) return results[r]; }
+  function loadCountCache() {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(COUNT_CACHE_KEY));
+      if (parsed && Number.isInteger(parsed.max) && parsed.max > 0) return parsed;
+    } catch (_) {}
     return null;
   }
 
-  async function checkNewImages(lastMax) {
-    var lo = lastMax, hi = lastMax + 1;
-    if (hi > CONFIG.EXP_CAP) return;
-    while (hi <= CONFIG.EXP_CAP) {
-      if (await resolveExt(hi)) { lo = hi; hi *= 2; }
-      else break;
-    }
-    if (lo <= lastMax) return;
-
-    var a = lo, b = (hi <= CONFIG.EXP_CAP) ? hi - 1 : CONFIG.EXP_CAP;
-    while (a < b) {
-      var mid = (a + b + 1) >> 1;
-      if (await resolveExt(mid)) a = mid; else b = mid - 1;
-    }
-
-    if (a <= lastMax) return;
-
-    state.max = a;
-    updateRollingCounter(totalEl, a);
-    numInput.max = a;
-    saveCache(a);
-    toast('发现新图片，已更新');
+  function saveCountCache(max) {
+    try {
+      localStorage.setItem(COUNT_CACHE_KEY, JSON.stringify({ max: max, checkedAt: Date.now() }));
+    } catch (_) {}
   }
 
-  function saveCache(max) {
-    try {
-      var exts = {};
-      for (var k in state.extCache) exts[k] = state.extCache[k];
-      localStorage.setItem("jrrp_max", JSON.stringify({ max: max, exts: exts }));
-    } catch (_) {}
+  // true：存在；false：明确不存在；null：网络异常，终止本轮探测
+  async function probeId(id) {
+    for (let i = 0; i < CONFIG.EXTENSIONS.length; i++) {
+      const ext = CONFIG.EXTENSIONS[i];
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), CONFIG.PROBE_TIMEOUT);
+      try {
+        const response = await fetch(urlOf(id, ext), {
+          method: 'HEAD',
+          cache: 'no-store',
+          signal: controller.signal
+        });
+        if (response.ok) {
+          state.extCache[id] = ext;
+          return true;
+        }
+        if (response.status !== 404) return null;
+      } catch (_) {
+        return null;
+      } finally {
+        clearTimeout(timer);
+      }
+      if (i + 1 < CONFIG.EXTENSIONS.length) await delay(CONFIG.PROBE_DELAY);
+    }
+    return false;
+  }
+
+  async function detectMax(start) {
+    // 先确认当前上限；若配置或缓存偏大，再向下二分校正。
+    let status = await probeId(start);
+    if (status === null) return null;
+    if (!status) {
+      let low = 1;
+      let high = start - 1;
+      let found = 0;
+      while (low <= high) {
+        await delay(CONFIG.PROBE_DELAY);
+        const mid = Math.floor((low + high) / 2);
+        status = await probeId(mid);
+        if (status === null) return null;
+        if (status) { found = mid; low = mid + 1; }
+        else high = mid - 1;
+      }
+      return found || null;
+    }
+
+    // 先看下一张；没有新增时只检查当前上限和下一个编号。
+    await delay(CONFIG.PROBE_DELAY);
+    status = await probeId(start + 1);
+    if (status === null) return null;
+    if (!status) return start;
+
+    // 有多张新增时用指数搜索 + 二分查找，避免逐张请求。
+    let low = start + 1;
+    let step = 2;
+    let high;
+    while (true) {
+      await delay(CONFIG.PROBE_DELAY);
+      const candidate = start + step;
+      status = await probeId(candidate);
+      if (status === null) return null;
+      if (!status) { high = candidate - 1; break; }
+      low = candidate;
+      step *= 2;
+    }
+    while (low < high) {
+      await delay(CONFIG.PROBE_DELAY);
+      const mid = Math.floor((low + high + 1) / 2);
+      status = await probeId(mid);
+      if (status === null) return null;
+      if (status) low = mid;
+      else high = mid - 1;
+    }
+    return low;
+  }
+
+  async function refreshCount() {
+    const cached = loadCountCache();
+    if (cached && Date.now() - cached.checkedAt < CONFIG.PROBE_INTERVAL) return;
+
+    const detected = await detectMax(state.max);
+    // 网络异常时保留可信的旧值，同时记录本次尝试以避免反复请求。
+    if (detected === null) {
+      saveCountCache(state.max);
+      return;
+    }
+    if (detected !== state.max) {
+      state.max = detected;
+      updateRollingCounter(totalEl, detected);
+      numInput.max = detected;
+      toast('图库数量已更新为 ' + detected);
+    }
+    saveCountCache(detected);
   }
 
   // ===== 滚动数字计数器（slot-machine 风格）=====
@@ -601,27 +617,17 @@
     else if (e.key === 'ArrowRight') nextImage();
   });
 
-  // ===== 初始化：先探测数量，再启用交互（不读取 bot 缓存）=====
-  (async function init() {
+  // ===== 初始化：先使用缓存数量，随后在后台低频复检 =====
+  (function init() {
     setBusy(true);
     placeholder.classList.remove('hide');
-    try {
-      const count = await detectMax();
-      if (count <= 0) {
-        placeholder.innerHTML = '<div>未检测到图片</div>';
-        setBusy(false);
-        return;
-      }
-      state.max = count;
-      updateRollingCounter(totalEl, count);
-      numInput.max = count;
-      setBusy(false);
-      randomImage();
-    } catch (err) {
-      placeholder.innerHTML = '<div>初始化失败</div>';
-      toast('初始化失败：' + (err && err.message ? err.message : '请检查网络'));
-      setBusy(false);
-    }
+    const cached = loadCountCache();
+    if (cached) state.max = cached.max;
+    updateRollingCounter(totalEl, state.max);
+    numInput.max = state.max;
+    setBusy(false);
+    randomImage();
+    setTimeout(refreshCount, 1200);
   })();
 })();
 </script>
