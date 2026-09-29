@@ -300,7 +300,7 @@
 <dialog class="upload-dialog" id="uploadDialog" aria-labelledby="uploadTitle">
   <form id="uploadForm">
     <h2 id="uploadTitle">上传图片</h2>
-    <p>图片将按下一个可用编号加入图库。支持 PNG、JPEG、WebP、GIF，最大 20 MB。</p>
+    <p>上传前会检查图库是否已有相同图片；新图片会按 JRRP 编号重命名为 kayoko_编号.格式。支持 PNG、JPEG、WebP、GIF，最大 20 MB。</p>
     <label for="uploadFile">选择图片</label>
     <input id="uploadFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif" required />
     <label for="uploadPassword">上传口令</label>
@@ -653,6 +653,10 @@
     if (bytes.length >= 12 && String.fromCharCode(...bytes.slice(0, 4)) === 'RIFF' && String.fromCharCode(...bytes.slice(8, 12)) === 'WEBP') return { extension: 'webp', type: 'image/webp' };
     return null;
   }
+  async function fileSha256(file) {
+    const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
+    return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+  }
   uploadForm.addEventListener('submit', async (event) => {
     event.preventDefault();
     if (uploading) return;
@@ -667,19 +671,21 @@
     uploading = true;
     $('uploadSubmit').disabled = true;
     uploadMessage.classList.remove('error');
-    uploadMessage.textContent = '正在上传…';
+    uploadMessage.textContent = '正在检查重复图片…';
     try {
       const format = await imageFormat(file);
       if (!format) throw new Error('请选择 PNG、JPEG、WebP 或 GIF 图片');
+      const sha256 = await fileSha256(file);
       let result;
       for (let attempt = 0; attempt < 3; attempt++) {
         const signResponse = await fetch(CONFIG.UPLOAD_API_URL, {
           method: 'POST',
           headers: { 'Authorization': 'Bearer ' + password, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ extension: format.extension, size: file.size })
+          body: JSON.stringify({ extension: format.extension, size: file.size, sha256 })
         });
         const signed = await signResponse.json().catch(() => null);
         if (!signResponse.ok || !signed?.uploadUrl) throw new Error(signed?.error || '上传接口不可用，请检查 Vercel 配置');
+        uploadMessage.textContent = '正在上传为 ' + signed.filename + '…';
         const uploadResponse = await fetch(signed.uploadUrl, {
           method: 'PUT',
           headers: signed.headers,
@@ -700,7 +706,7 @@
       }
       state.extCache[result.id] = result.extension;
       uploadDialog.close();
-      toast('上传成功，编号 ' + result.id);
+      toast('上传成功：' + result.filename);
       loadImage(result.id);
     } catch (error) {
       uploadMessage.textContent = error instanceof TypeError
