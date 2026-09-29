@@ -216,6 +216,36 @@
   }
   .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
+  .upload-dialog {
+    width: min(440px, calc(100vw - 32px));
+    max-height: calc(100dvh - 32px);
+    border: 1px solid var(--border-strong);
+    border-radius: 18px;
+    padding: 28px;
+    color: var(--text);
+    background: #151517;
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.65);
+  }
+  .upload-dialog::backdrop { background: rgba(0, 0, 0, 0.76); }
+  .upload-dialog h2 { margin: 0 0 8px; font-size: 20px; font-weight: 600; }
+  .upload-dialog p { margin: 0 0 22px; color: var(--dim); font-size: 13px; line-height: 1.6; }
+  .upload-dialog label { display: block; margin: 16px 0 8px; font-size: 13px; }
+  .upload-dialog input {
+    width: 100%;
+    border: 1px solid var(--border-strong);
+    border-radius: 10px;
+    padding: 11px 12px;
+    background: var(--surface);
+    color: var(--text);
+    font: inherit;
+  }
+  .upload-dialog input[type="file"] { font-size: 12px; }
+  .upload-dialog input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .upload-dialog .actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px; }
+  .upload-dialog .actions .btn { padding: 10px 18px; }
+  .upload-dialog .message { min-height: 18px; margin-top: 16px; color: var(--dim); font-size: 12px; }
+  .upload-dialog .message.error { color: #ff9e9e; }
+
   @media (max-width: 520px) {
     .controls { gap: 8px; }
   }
@@ -267,6 +297,22 @@
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
+<dialog class="upload-dialog" id="uploadDialog" aria-labelledby="uploadTitle">
+  <form id="uploadForm">
+    <h2 id="uploadTitle">上传图片</h2>
+    <p>图片将按下一个可用编号加入图库。支持 PNG、JPEG、WebP、GIF，最大 20 MB。</p>
+    <label for="uploadFile">选择图片</label>
+    <input id="uploadFile" type="file" accept="image/png,image/jpeg,image/webp,image/gif" required />
+    <label for="uploadPassword">上传口令</label>
+    <input id="uploadPassword" type="password" autocomplete="off" required />
+    <div class="message" id="uploadMessage" role="status" aria-live="polite"></div>
+    <div class="actions">
+      <button type="button" class="btn" id="uploadCancel">取消</button>
+      <button type="submit" class="btn primary" id="uploadSubmit">上传</button>
+    </div>
+  </form>
+</dialog>
+
 <script>
 (function () {
   'use strict';
@@ -278,11 +324,13 @@
     DEFAULT_MAX: 930,              // 首次打开或探测失败时使用
     PROBE_INTERVAL: 6 * 60 * 60 * 1000, // 每个浏览器最多每 6 小时复检一次
     PROBE_DELAY: 150,              // 探测请求严格串行，避免触发 COS 限流
-    PROBE_TIMEOUT: 5000
+    PROBE_TIMEOUT: 5000,
+    UPLOAD_API_URL: '/api/upload'
   };
 
   const state = {
     max: CONFIG.DEFAULT_MAX,
+    confirmedMax: 0,
     current: null,
     ready: false,
     extCache: Object.create(null)
@@ -440,13 +488,14 @@
       saveCountCache(state.max);
       return;
     }
-    if (detected !== state.max) {
-      state.max = detected;
-      updateRollingCounter(totalEl, detected);
-      numInput.max = detected;
-      toast('图库数量已更新为 ' + detected);
+    const nextMax = Math.max(detected, state.confirmedMax);
+    if (nextMax !== state.max) {
+      state.max = nextMax;
+      updateRollingCounter(totalEl, nextMax);
+      numInput.max = nextMax;
+      toast('图库数量已更新为 ' + nextMax);
     }
-    saveCountCache(detected);
+    saveCountCache(nextMax);
   }
 
   // ===== 滚动数字计数器（slot-machine 风格）=====
@@ -527,6 +576,7 @@
   function loadImage(id, onGap) {
     id = parseInt(id, 10);
     if (!id || id < 1 || id > state.max) { toast('编号需在 1 ~ ' + state.max); return; }
+    secretClickCount = 0;
     placeholder.classList.remove('hide');
     mainImg.classList.remove('show');
     applyImgWithFallback(mainImg, id, urlOf,
@@ -569,6 +619,99 @@
     actionBtns.forEach((b) => { b.disabled = busy; });
     numInput.disabled = busy;
   }
+
+  // 入口只在编号 317 的图片上连续点击五次后出现；口令由服务端校验。
+  const uploadDialog = $('uploadDialog');
+  const uploadForm = $('uploadForm');
+  const uploadMessage = $('uploadMessage');
+  let secretClickCount = 0;
+  let lastSecretClick = 0;
+  let uploading = false;
+  mainImg.addEventListener('click', () => {
+    if (state.current !== 317 || !mainImg.classList.contains('show')) return;
+    const now = Date.now();
+    secretClickCount = now - lastSecretClick <= 3000 ? secretClickCount + 1 : 1;
+    lastSecretClick = now;
+    if (secretClickCount === 5) {
+      secretClickCount = 0;
+      uploadMessage.textContent = '';
+      uploadDialog.showModal();
+    }
+  });
+  $('uploadCancel').addEventListener('click', () => { if (!uploading) uploadDialog.close(); });
+  uploadDialog.addEventListener('cancel', (event) => { if (uploading) event.preventDefault(); });
+  uploadDialog.addEventListener('close', () => {
+    uploadForm.reset();
+    uploadMessage.textContent = '';
+    uploadMessage.classList.remove('error');
+  });
+  async function imageFormat(file) {
+    const bytes = new Uint8Array(await file.slice(0, 16).arrayBuffer());
+    if (bytes.length >= 8 && [137, 80, 78, 71, 13, 10, 26, 10].every((n, i) => bytes[i] === n)) return { extension: 'png', type: 'image/png' };
+    if (bytes.length >= 3 && bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255) return { extension: 'jpg', type: 'image/jpeg' };
+    if (bytes.length >= 6 && String.fromCharCode(...bytes.slice(0, 6)).match(/^GIF8[79]a$/)) return { extension: 'gif', type: 'image/gif' };
+    if (bytes.length >= 12 && String.fromCharCode(...bytes.slice(0, 4)) === 'RIFF' && String.fromCharCode(...bytes.slice(8, 12)) === 'WEBP') return { extension: 'webp', type: 'image/webp' };
+    return null;
+  }
+  uploadForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (uploading) return;
+    const file = $('uploadFile').files[0];
+    const password = $('uploadPassword').value;
+    if (!file || !password) return;
+    if (file.size === 0 || file.size > 20 * 1024 * 1024) {
+      uploadMessage.textContent = '图片不能超过 20 MB';
+      uploadMessage.classList.add('error');
+      return;
+    }
+    uploading = true;
+    $('uploadSubmit').disabled = true;
+    uploadMessage.classList.remove('error');
+    uploadMessage.textContent = '正在上传…';
+    try {
+      const format = await imageFormat(file);
+      if (!format) throw new Error('请选择 PNG、JPEG、WebP 或 GIF 图片');
+      let result;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const signResponse = await fetch(CONFIG.UPLOAD_API_URL, {
+          method: 'POST',
+          headers: { 'Authorization': 'Bearer ' + password, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ extension: format.extension, size: file.size })
+        });
+        const signed = await signResponse.json().catch(() => null);
+        if (!signResponse.ok || !signed?.uploadUrl) throw new Error(signed?.error || '上传接口不可用，请检查 Vercel 配置');
+        const uploadResponse = await fetch(signed.uploadUrl, {
+          method: 'PUT',
+          headers: signed.headers,
+          body: file
+        });
+        if (uploadResponse.status === 409 || uploadResponse.status === 412) continue;
+        if (!uploadResponse.ok) throw new Error('存储桶写入失败（HTTP ' + uploadResponse.status + '）');
+        result = signed;
+        break;
+      }
+      if (!result) throw new Error('编号被占用，请重试');
+      state.confirmedMax = Math.max(state.confirmedMax, result.id);
+      if (result.id > state.max) {
+        state.max = result.id;
+        updateRollingCounter(totalEl, state.max);
+        numInput.max = state.max;
+        saveCountCache(state.max);
+      }
+      state.extCache[result.id] = result.extension;
+      uploadDialog.close();
+      toast('上传成功，编号 ' + result.id);
+      loadImage(result.id);
+    } catch (error) {
+      uploadMessage.textContent = error instanceof TypeError
+        ? '网络请求失败，请检查 COS 跨域设置后重试'
+        : error.message || '上传失败，请稍后重试';
+      uploadMessage.classList.add('error');
+    } finally {
+      uploading = false;
+      $('uploadSubmit').disabled = false;
+    }
+  });
 
   // ===== 事件 =====
   $('btnRandom').addEventListener('click', () => randomImage());
